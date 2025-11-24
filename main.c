@@ -9,8 +9,12 @@
 #define INFINITO INT_MAX
 #define MAX_NOME 30
 #define MAX_NOS 256
+#define TOTAL_ARESTAS_FIXAS 136
 #define COR_ROXO "\033[35m"
 #define COR_VERMELHO "\033[31m"
+#define COR_VERDE "\033[32m"
+#define COR_AZUL "\033[34m"
+#define COR_AMARELO "\033[33m"
 #define COR_RESET "\033[0m"
 
 typedef struct {
@@ -19,7 +23,7 @@ typedef struct {
     int peso;
 } ArestaFixa;
 
-static const ArestaFixa EDGES[] = {
+static const ArestaFixa ARESTAS_FIXAS[] = {
     {"Ayr'ka", "Hadur", 1},
     {"Ayr'ka", "Indra", 1},
     {"Bacchus", "Geddon", 1},
@@ -157,7 +161,6 @@ static const ArestaFixa EDGES[] = {
     {"Vermilion", "Virgo", 1},
     {"Virgo", "Vulture", 1},
 };
-#define TOTAL_EDGES 136
 
 typedef struct Aresta
 {
@@ -198,7 +201,6 @@ int adicionarNo(Grafo* g, const char* nome)
     
     if (idx != -1)
     {                                                                               
-        printf("O nó '%s' já existe no grafo. Bobo\n", nome);
         return idx;
     }
 
@@ -258,22 +260,39 @@ void removerAresta(Grafo* g, const char* origem, const char* destino)
     removerArestaDireta(g, d, o);
 }
 
+int obterPesoAresta(Grafo* g, int origem, int destino) {
+    Aresta* atual = g->listaNos[origem].listaArestas;
+    while (atual) {
+        if (atual->destino == destino) return atual->peso;
+        atual = atual->proxima;
+    }
+    return -1;
+}
+
+const char* corPorPeso(int peso) {
+    if (peso <= 1) return COR_VERDE;
+    if (peso <= 3) return COR_AMARELO;
+    return COR_VERMELHO;
+}
+
 void carregarDadosEmCodigo(Grafo* g) {
-    for (int i = 0; i < TOTAL_EDGES; i++) {
-        adicionarAresta(g, EDGES[i].a, EDGES[i].b, EDGES[i].peso);
+    for (int i = 0; i < TOTAL_ARESTAS_FIXAS; i++) {
+        adicionarAresta(g, ARESTAS_FIXAS[i].a, ARESTAS_FIXAS[i].b, ARESTAS_FIXAS[i].peso);
     }
 }
 
 void exibirGrafo(Grafo* g) {
-    printf("Grafo com %d nos:\n", g->totalNos);
+    printf(COR_AZUL "Grafo com %d nos:" COR_RESET "\n", g->totalNos);
     for (int i = 0; i < g->totalNos; i++) {
-        printf("[%d] %s\n", i, g->listaNos[i].nome);
+        printf(COR_ROXO "[%d]" COR_RESET " %s\n", i, g->listaNos[i].nome);
         Aresta* a = g->listaNos[i].listaArestas;
         if (!a) {
-            printf("  (sem arestas)\n");
+            printf(COR_AMARELO "  (sem arestas)" COR_RESET "\n");
         }
         while (a) {
-            printf("  -> %s (peso %d)\n", g->listaNos[a->destino].nome, a->peso);
+            const char* corPeso = corPorPeso(a->peso);
+            printf("  " COR_VERDE "->" COR_RESET " %s %s(peso %d)" COR_RESET "\n",
+                   g->listaNos[a->destino].nome, corPeso, a->peso);
             a = a->proxima;
         }
     }
@@ -323,9 +342,9 @@ void imprimirCaminho(Grafo* g, int anterior[], int v) {
     if (v == -1) return;
     if (anterior[v] != -1) {
         imprimirCaminho(g, anterior, anterior[v]);
-        printf(" -> ");
+        printf(" " COR_AZUL "->" COR_RESET " ");
     }
-    printf("%s", g->listaNos[v].nome);
+    printf(COR_ROXO "%s" COR_RESET, g->listaNos[v].nome);
 }
 
 void dfs(Grafo* g, int v, int visitado[]) {
@@ -408,6 +427,80 @@ double tempoDecorrido(clock_t inicio, clock_t fim) {
     return ((double)(fim - inicio)) / CLOCKS_PER_SEC;
 }
 
+// Encontra rota alternativa removendo temporariamente cada aresta do caminho principal
+void rotaAlternativa(Grafo* g, int origem, int destino) {
+    int anterior[MAX_NOS];
+    int dist;
+
+    dijkstra(g, origem, destino, &dist, anterior);
+
+    if (dist == INFINITO) {
+        printf("Nao existe caminho principal entre as estacoes.\n");
+        return;
+    }
+
+    int caminho[MAX_NOS];
+    int tam = 0;
+    int atual = destino;
+
+    while (atual != -1) {
+        caminho[tam++] = atual;
+        atual = anterior[atual];
+    }
+
+    printf(COR_AZUL "Caminho principal:" COR_RESET " ");
+    for (int i = tam - 1; i >= 0; i--) {
+        printf(COR_ROXO "%s" COR_RESET, g->listaNos[caminho[i]].nome);
+        if (i > 0) printf(" " COR_AZUL "->" COR_RESET " ");
+    }
+    printf(" " COR_AMARELO "(custo %d)" COR_RESET "\n", dist);
+
+    int melhorAlternativa = INFINITO;
+    int melhorAnterior[MAX_NOS];
+
+    for (int i = tam - 1; i > 0; i--) {
+        int u = caminho[i];
+        int v = caminho[i - 1];
+
+        const char* noU = g->listaNos[u].nome;
+        const char* noV = g->listaNos[v].nome;
+
+        int pesoOriginal = obterPesoAresta(g, u, v);
+
+        printf("\n" COR_VERMELHO "Testando falha na rota:" COR_RESET " %s " COR_AZUL "<->" COR_RESET " %s\n", noU, noV);
+
+        removerAresta(g, noU, noV);
+
+        int antTemp[MAX_NOS], distTemp;
+        dijkstra(g, origem, destino, &distTemp, antTemp);
+
+        if (distTemp != INFINITO) {
+            printf("  " COR_VERDE "Caminho alternativo encontrado" COR_RESET " " COR_AMARELO "(custo %d)" COR_RESET ": ", distTemp);
+            imprimirCaminho(g, antTemp, destino);
+            printf("\n");
+
+            if (distTemp < melhorAlternativa) {
+                melhorAlternativa = distTemp;
+                memcpy(melhorAnterior, antTemp, sizeof(int) * MAX_NOS);
+            }
+        } else {
+            printf("  " COR_VERMELHO "Nenhum caminho alternativo disponivel." COR_RESET "\n");
+        }
+
+        if (pesoOriginal == -1) pesoOriginal = 1;
+        adicionarAresta(g, noU, noV, pesoOriginal);
+    }
+
+    printf("\n" COR_AZUL "========== Resultado Final =========" COR_RESET "\n");
+    if (melhorAlternativa == INFINITO) {
+        printf(COR_VERMELHO "Nao existem rotas alternativas disponiveis." COR_RESET "\n");
+    } else {
+        printf(COR_VERDE "Melhor rota alternativa" COR_RESET " " COR_AMARELO "(custo %d)" COR_RESET ": ", melhorAlternativa);
+        imprimirCaminho(g, melhorAnterior, destino);
+        printf("\n");
+    }
+}
+
 int main() {
     Grafo g;
     g.totalNos = 0;
@@ -474,6 +567,16 @@ int main() {
                     printf("\n");
                 }
                 printf("Tempo de execucao: %.6f s\n", tempoDecorrido(t0, t1));
+
+                if (dist != INFINITO) {
+                    char resposta;
+                    printf("\nDeseja buscar uma rota alternativa? (s/n): ");
+                    scanf(" %c", &resposta);
+                    limparBufferEntrada();
+                    if (resposta == 's' || resposta == 'S') {
+                        rotaAlternativa(&g, o, d);
+                    }
+                }
             }
             aguardarEnter();
         } else if (escolha == 3) {
